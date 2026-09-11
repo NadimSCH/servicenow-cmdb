@@ -77,7 +77,7 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: O2 produces an incomplete integration that fails tests 17 and 18 and does not match the "Add these actions to the existing Action selector" UI requirement. O1 infers standard Incident/RITM fields from the ServiceNow Table API, which is well-documented and straightforward to implement alongside the CMDB actions.
 - **Trade-offs**: O1 requires implementing Incident/RITM field specifications from inference (field names, required vs. optional) since the requirements only describe CMDB fields in detail. O2 is narrower but leaves the integration incomplete.
 - **Requirement Impact**: If O2 is selected, remove test cases 17–18, and remove `Create Incident`, `Update Incident`, `Update RITM` from the Action choice field.
-- **User's Answer**: O1 — Implement all 5 actions from scratch
+- **User's Answer**: O1 — Implement all 5 actions from scratch. The workspace is a clean slate with no external code to integrate. Building all 5 actions is the only self-contained path that satisfies all 18 stated test cases and produces the complete 5-action integration described in the UI requirements.
 
 ---
 
@@ -108,7 +108,7 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: Basic Auth is universally supported on all ServiceNow instances without additional configuration, requires a single credential field, and eliminates token refresh complexity. The connection is always HTTPS (required by ServiceNow), which protects credentials in transit. This matches the most common pattern for on-premise ServiceNow automation integrations.
 - **Trade-offs**: Basic Auth sends credentials on every request (mitigated by HTTPS and ServiceNow's enforcement of TLS). OAuth provides short-lived tokens that reduce exposure window but require ServiceNow OAuth app setup, token fetch logic, and expiry handling — significantly more complex for the same functional result.
 - **Requirement Impact**: None — the requirements do not specify an auth method; Basic Auth satisfies all HTTP 401/403 test cases.
-- **User's Answer**: O1 — Basic Authentication
+- **User's Answer**: O1 — Basic Authentication (single Credential field with `user` = ServiceNow username, `password` = ServiceNow password)
 
 ---
 
@@ -163,7 +163,7 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: The UAC Array Field is the native, purpose-built solution for key-value pairs. It eliminates format parsing errors, provides clear UI guidance (separate columns prevent ambiguity about the `=` separator), and handles Stonebranch variable substitution automatically. The IRE payload construction simply iterates the list of `{name, value}` pairs — no custom parsing logic required.
 - **Trade-offs**: Array Field requires one `+` click per attribute row vs. pasting a block of text. For users who prefer bulk-paste, Large Text is more convenient but introduces parsing edge cases and potential errors in variable substitution detection.
 - **Requirement Impact**: The example format in requirements (`name = ${vm_name}`) maps directly to Array Field rows where column 1 = `name` and column 2 = `${ops_var_vm_name}`. No change to the business logic specification.
-- **User's Answer**: O1 — Array Field with columns "Attribute Name" / "Attribute Value"
+- **User's Answer**: O1 — Array Field with column titles "Attribute Name" and "Attribute Value"
 
 ---
 
@@ -210,7 +210,7 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: Test case 10 explicitly names this "clear NOT_FOUND behavior" — which aligns with a failure response. For workflow automation, a failure provides a clear, unambiguous signal that the CI lookup produced no result, triggering UAC's built-in error handling rather than requiring conditional field-value checks in downstream tasks. This is the safer default for production workflows.
 - **Trade-offs**: O1 requires users to add explicit error handling (UAC "On Failure" task or workflow branch) when "not found" is acceptable (e.g., "create CI if not found" pattern). O2 is more lenient but puts the burden of detecting "no result" on downstream conditional logic.
 - **Requirement Impact**: `NOT_FOUND_ERROR` is already listed in the error handling section; this confirms it maps to `rc=1`. STDOUT should include a clear message: `"No CI found matching search criteria."` Status description: `"Not Found: No CI found for [search criteria]"`.
-- **User's Answer**: O1 — Task fails (rc=1) with NOT_FOUND_ERROR
+- **User's Answer**: O1 — Task fails (rc=1) with `NOT_FOUND_ERROR` status description and empty result output fields
 
 ---
 
@@ -232,7 +232,7 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: Downstream workflow tasks typically need direct variable access to CI attributes (e.g., use `${ops_var_cmdb_sys_id}` in a subsequent update task). Populating from the first result enables this without requiring JSON parsing in downstream tasks. The Limit field defaults to 1 for most use cases; when users set Limit > 1, `cmdb_results_json` provides the full dataset. A STDOUT note ("1 of N results shown in output fields") makes the behavior transparent.
 - **Trade-offs**: O1 may cause confusion if users don't notice that individual fields only reflect the first result when multiple are returned. O2 is unambiguous but forces all multi-result callers to implement JSON extraction logic.
 - **Requirement Impact**: Add a STDOUT note when result count > 1: `"Returning N results. Individual output fields reflect the first result. Full results in cmdb_results_json."` Both `cmdb_result_json` (first result) and `cmdb_results_json` (all results) are populated when count > 1.
-- **User's Answer**: O1 — Individual fields from first result + cmdb_results_json for all results
+- **User's Answer**: O1 — Populate individual fields from the first result + `cmdb_results_json` for all results
 
 ---
 
@@ -253,7 +253,7 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: Returning all fields produces large, noisy responses that bloat the UAC database and make `cmdb_result_json` difficult to use in downstream tasks. A sensible default covers the primary use case (VM CI details matching the requirements example) while remaining easy to override. This follows the UAC architect pattern for "Large Output Safety Net" — keeping inline output manageable by default.
 - **Trade-offs**: O2 may omit CI attributes the user expects to see by default (e.g., environment, location, asset_tag). Users must specify Return Fields to access non-default attributes. O1 returns everything but creates large, hard-to-navigate JSON. O3 is most explicit but adds friction for common quick lookups.
 - **Requirement Impact**: Document the default field set in the "Return Fields" field hint: `"Comma-separated CI fields to return. Default: sys_id, name, ip_address, operational_status, cpu_count, ram, os, short_description"`. STDOUT should indicate when defaults are applied.
-- **User's Answer**: O2 — Return standard default set: `sys_id, name, ip_address, operational_status, cpu_count, ram, os, short_description`
+- **User's Answer**: O2 — Return a standard default set: `sys_id, name, ip_address, operational_status, cpu_count, ram, os, short_description`
 
 ---
 
@@ -300,7 +300,7 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: UAC architect notes explicitly recommend tabulate with `rounded_outline` format for tabular data. The library is pure Python and platform-agnostic, so it introduces no compatibility risk. It significantly improves readability for operators reviewing task output in the UAC UI. The dependency is minimal (a single small pure-Python package).
 - **Trade-offs**: O1 adds one dependency to `requirements.txt`. O2 avoids any dependency but produces less readable output, especially for Get CI where many CI attributes are displayed.
 - **Requirement Impact**: Add `tabulate==0.10.0` to `requirements.txt`.
-- **User's Answer**: O1 — ASCII table using tabulate==0.10.0
+- **User's Answer**: O1 — ASCII table using `tabulate==0.10.0` with `tablefmt="rounded_outline"`
 
 ---
 
@@ -322,4 +322,4 @@ The requirements are precise about APIs, field names, and error categories. The 
 - **Rationale**: UAC architect notes explicitly recommend the environment variable approach for timeout parameters. HTTP timeout is an operational tuning knob that rarely needs per-task customization — a 30-second default covers the vast majority of ServiceNow API calls. Keeping it out of the template UI reduces clutter and follows the principle of sensible defaults.
 - **Trade-offs**: O1 requires operators to know the environment variable name to change it; cannot be set per-task without creating task-level environment variable overrides. O2 makes it visible and per-task configurable but adds a field most users will never change from the default, adding noise to the template form.
 - **Requirement Impact**: Document `UE_HTTP_TIMEOUT` in the template description or field hints. Code: `timeout = int(os.environ.get("UE_HTTP_TIMEOUT", 30))`.
-- **User's Answer**: O1 — UE_HTTP_TIMEOUT environment variable (default 30 seconds)
+- **User's Answer**: O1 — `UE_HTTP_TIMEOUT` environment variable with a 30-second code default
