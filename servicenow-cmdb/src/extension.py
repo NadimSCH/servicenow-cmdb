@@ -12,11 +12,13 @@ by UAC when the extension task executes. It orchestrates all components:
 import json
 
 from universal_extension import UniversalExtension, ExtensionResult, logger
+from universal_extension.deco.choice import dynamic_choice_command
 from fields.input import InputFields
 from actions.output import ActionOutput
 from actions import ACTION_MAPPER
 from exceptions import ExecutionError, UnexpectedSystemError
 from manager import ExtensionManager
+from utility import ServiceNowClient
 
 # Extension metadata - UPDATE THESE FROM YOUR ANALYSIS
 EXTENSION_NAME = "servicenow-cmdb"
@@ -208,52 +210,82 @@ class Extension(UniversalExtension):
 
 
     # ============================================================================
-    # CUSTOMIZE: Add Dynamic Choice Commands (MUST be methods inside Extension class)
+    # Dynamic Choice Commands
     # ============================================================================
 
-    # Example dynamic choice command:
-    #
-    # from universal_extension.deco.choice import dynamic_choice_command
-    #
-    # @dynamic_choice_command("field_name")
-    # def get_resources(self, fields: dict) -> ExtensionResult:
-    #     """
-    #     Dynamic choice function for resource selection.
-    #
-    #     Called by UAC when user opens the dropdown for 'field_name'.
-    #     The field_name in decorator MUST match the field's "name" property in template.json.
-    #     The field in template.json MUST have "choiceDynamic": true.
-    #
-    #     Args:
-    #         fields: Current field values (for dependencies)
-    #
-    #     Returns:
-    #         ExtensionResult with values parameter containing list of choices.
-    #         Parameters: rc (int), message (str), values (List[str])
-    #     """
-    #     try:
-    #         logger.info("Fetching available resources")
-    #
-    #         # May depend on other fields (extract as list)
-    #         filter_type = fields.get("filter_type", [""])[0] if fields.get("filter_type") else None
-    #
-    #         # Query resources
-    #         resources = ["resource1", "resource2", "resource3"]
-    #
-    #         logger.info("Found %d resources", len(resources))
-    #         return ExtensionResult(
-    #             rc=0,
-    #             message="Successfully retrieved resources",
-    #             values=resources
-    #         )
-    #
-    #     except Exception as e:
-    #         logger.error("Failed to fetch resources: %s", str(e))
-    #         return ExtensionResult(
-    #             rc=1,
-    #             message=f"Failed to fetch resources: {str(e)}",
-    #             values=[]
-    #         )
+    @dynamic_choice_command("ci_class")
+    def get_ci_classes(self, fields: dict) -> ExtensionResult:
+        """
+        Populate the CI Class dropdown with all available CMDB CI tables from ServiceNow.
+
+        Called by UAC when the user clicks the refresh button on the ci_class dropdown.
+        Queries sys_db_object for all tables whose name starts with cmdb_ci and returns
+        them formatted as "<Label> (<table_name>)" for human-readable selection.
+
+        Dependencies (declared in template.json choiceFields):
+            - instance_url (Text Field 1): Base URL of the ServiceNow instance.
+            - credential (Credential Field 1): Basic Auth credentials.
+
+        Args:
+            fields: Raw field values from the UAC task form for the declared dependencies.
+
+        Returns:
+            ExtensionResult with values containing a sorted list of CI class strings,
+            or an empty list on error.
+        """
+        client: ServiceNowClient | None = None
+        try:
+            processed = InputFields.preprocess_fields(fields)
+            input_data = InputFields(**processed, _skip_validation=True)
+
+            instance_url: str = (
+                input_data.instance_url.value
+                if input_data.instance_url and input_data.instance_url.value
+                else ""
+            )
+            if not instance_url:
+                logger.error("ci_class dynamic choice: instance_url is empty")
+                return ExtensionResult(rc=1, message="instance_url is required", values=[])
+
+            if not input_data.credential or not input_data.credential.user:
+                logger.error("ci_class dynamic choice: credential is missing or incomplete")
+                return ExtensionResult(rc=1, message="credential is required", values=[])
+
+            username: str = input_data.credential.user
+            password: str = input_data.credential.password or ""
+
+            logger.info("Loading CI classes from %s", instance_url)
+
+            client = ServiceNowClient(instance_url, username, password)
+            response_body: dict = client.get(
+                "/api/now/table/sys_db_object",
+                params={
+                    "sysparm_query": "name STARTSWITH cmdb_ci",
+                    "sysparm_fields": "name,label",
+                    "sysparm_limit": "1000",
+                },
+            )
+
+            records: list = response_body.get("result", [])
+            choices: list[str] = []
+            for record in records:
+                name: str = record.get("name", "") or ""
+                label: str = record.get("label", "") or ""
+                if not name:
+                    continue
+                display_label: str = label if label else name
+                choices.append(f"{display_label} ({name})")
+
+            choices.sort()
+            logger.info("Loaded %d CI classes", len(choices))
+            return ExtensionResult(rc=0, message="CI classes retrieved", values=choices)
+
+        except Exception as e:
+            logger.error("Failed to load CI classes: %s", str(e))
+            return ExtensionResult(rc=1, message=f"Error: {str(e)}", values=[])
+        finally:
+            if client is not None:
+                client.close()
 
 
     # ============================================================================

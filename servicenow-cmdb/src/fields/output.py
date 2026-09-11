@@ -1,66 +1,96 @@
-"""OutputFields dataclass for real-time UI updates."""
+"""
+OutputFields dataclass for the ServiceNow CMDB Universal Extension.
 
+Provides real-time UI field updates during extension execution and carries
+previous-run data when a task is re-run. Field names match the output-only
+fields defined in template.json.
+"""
 from dataclasses import dataclass, asdict
 from typing import Optional
+
+from fields.types import Integer, Text
 from universal_extension import ui
-from fields.types import Text
 
 
 @dataclass
 class OutputFields:
-    """Real-time output fields for UAC UI updates.
+    """
+    Real-time output fields for UAC UI updates.
 
-    Define fields for progress tracking during execution.
-    These fields sync with the UAC UI in real-time and are available
-    in subsequent re-runs via InputFields.previous_output.
-
-    All output fields should use the Text wrapper type.
+    All fields correspond to output-only entries in template.json.
+    String-valued fields use the Text wrapper; numeric fields use Integer.
     """
 
-    # Define your progress tracking fields here using Text wrapper
-    # Example fields:
-    # status: Optional[Text] = None
-    # progress: Optional[Text] = None
-    # current_item: Optional[Text] = None
-    # items_processed: Optional[Text] = None
-    # last_processed_id: Optional[Text] = None
+    # --- Incident outputs (Create Incident / Update Incident) ---
+    incident_number: Optional[Text] = None
 
-    def update(self, **fields):
-        """Update fields and sync with UAC UI in real-time.
+    # --- RITM outputs (Update RITM) ---
+    ritm_number: Optional[Text] = None
+
+    # --- CI Create/Update outputs ---
+    cmdb_action: Optional[Text] = None
+    cmdb_sys_id: Optional[Text] = None
+    cmdb_class: Optional[Text] = None
+    cmdb_name: Optional[Text] = None
+    cmdb_status: Optional[Text] = None
+
+    # --- Get CI outputs ---
+    cmdb_operational_status: Optional[Integer] = None
+    cmdb_cpu_count: Optional[Integer] = None
+    cmdb_ram: Optional[Integer] = None
+    cmdb_result_count: Optional[Integer] = None
+    cmdb_result_json: Optional[Text] = None
+    cmdb_results_json: Optional[Text] = None
+
+    def update(self, **fields: object) -> None:
+        """
+        Update output fields and sync with the UAC UI in real-time.
+
+        String values are automatically wrapped in Text. Integer-typed fields
+        accept int values directly.
 
         Args:
-            **fields: Field names and values to update (strings will be wrapped in Text)
+            **fields: Field names and values to update.
         """
         for field_name, field_value in fields.items():
             if hasattr(self, field_name):
-                # Wrap string values in Text type
                 if isinstance(field_value, str):
                     field_value = Text(field_value)
                 setattr(self, field_name, field_value)
         ui.update_output_fields(fields)
 
     def to_dict(self) -> dict:
-        """Get current fields as dictionary.
+        """
+        Return current field values as a plain dictionary.
+
+        Text wrapper values are unwrapped to strings; Integer wrapper values
+        are unwrapped to ints. None fields are omitted.
 
         Returns:
-            Dict with non-None field values (Text wrappers unwrapped to strings)
+            Dict of non-None field values with raw Python types.
         """
         result = {}
         for k, v in asdict(self).items():
-            if v is not None:
-                # Extract value from Text wrapper
-                result[k] = v.value if isinstance(v, Text) else v
+            if v is None:
+                continue
+            if isinstance(v, dict) and "value" in v:
+                result[k] = v["value"]
+            else:
+                result[k] = v
         return result
 
-    def clear(self):
-        """Reset all fields to None.
-
-        Update this method to match your defined fields.
-        """
-        # Add your fields here
-        # self.status = None
-        # self.progress = None
-        # self.current_item = None
-        # self.items_processed = None
-        # self.last_processed_id = None
-        pass
+    def clear(self) -> None:
+        """Reset all output fields to None."""
+        self.incident_number = None
+        self.ritm_number = None
+        self.cmdb_action = None
+        self.cmdb_sys_id = None
+        self.cmdb_class = None
+        self.cmdb_name = None
+        self.cmdb_status = None
+        self.cmdb_operational_status = None
+        self.cmdb_cpu_count = None
+        self.cmdb_ram = None
+        self.cmdb_result_count = None
+        self.cmdb_result_json = None
+        self.cmdb_results_json = None
